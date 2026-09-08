@@ -37,12 +37,23 @@
       <section class="reports-panel" aria-labelledby="reports-title">
         <h2 id="reports-title">Latest reports</h2><nav class="report-links" id="report-links" aria-label="Latest portfolio reports"></nav>
       </section>
+      <section id="report-reader" class="panel report-reader" hidden aria-labelledby="report-title">
+        <header class="report-heading">
+          <button type="button" id="report-back">← Portfolio</button>
+          <h2 id="report-title" tabindex="-1">Report</h2>
+          <button type="button" id="report-refresh">Refresh report</button>
+        </header>
+        <p id="report-meta" class="small"></p>
+        <p id="report-status" class="notice" role="status" aria-live="polite"></p>
+        <button type="button" id="report-connect" hidden>Connect to read cloud reports</button>
+        <article id="report-content" class="report-content" aria-busy="false"></article>
+      </section>
       <details class="data-details" id="data-details">
         <summary><span id="saved-summary">Saved portfolio</span><span id="coverage-summary"></span><span class="details-label">Data details</span></summary>
         <div class="details-body">
           <p class="eyebrow" id="source-label"></p><p id="updated" class="muted"></p><p id="quote-freshness" class="muted"></p><p id="refresh-status" class="muted" aria-live="polite"></p>
           <div id="warnings" class="warning-box" hidden></div>
-          <p class="small">Quote times vary by instrument; funds may use the last published NAV. Saved values do not verify current brokerage reconciliation. Report links open the latest saved copy in GitHub; check the date inside each report.</p>
+          <p class="small">Quote times vary by instrument; funds may use the last published NAV. Saved values do not verify current brokerage reconciliation. Report links show the latest saved cloud copy here; check the date inside each report.</p>
           <p class="small" id="source-detail"></p>
           <p class="small" id="report-source"></p>
           <section id="action-panel" class="action-panel" hidden><div class="section-heading"><h3>Saved action note</h3><span id="action-date" class="small"></span></div><p id="action-text"></p></section>
