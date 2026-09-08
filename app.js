@@ -1,5 +1,6 @@
-import { loadGithubPortfolio, parsePortfolioExport, githubContentsUrl, githubReportLinks, DEFAULT_REPORT_SOURCE, markedAllocation, scopeTotals, displayUnrealizedPnl, needsValuation, markEvidence, valuationPresentation, createRefreshScheduler, MAX_EXPORT_BYTES } from "./loader.js";
+import { loadGithubPortfolio, loadGithubReport, REPORT_TYPES, parsePortfolioExport, githubContentsUrl, githubReportLinks, DEFAULT_REPORT_SOURCE, markedAllocation, scopeTotals, displayUnrealizedPnl, needsValuation, markEvidence, valuationPresentation, createRefreshScheduler, MAX_EXPORT_BYTES } from "./loader.js";
 import { COLUMNS, OPTION_SORT_KEYS, positionDisplay, groupedHoldings, shortPutNotional, newYorkDate } from "./view-model.js";
+import { renderReportMarkdown } from "./report-markdown.js";
 
 const el = (id) => document.getElementById(id);
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -12,6 +13,9 @@ let credentials = null;
 let request = null;
 let generation = 0;
 let sourceName = "";
+let selectedReport = null;
+let reportRequest = null;
+let reportGeneration = 0;
 let sort = { key: "symbol", descending: false };
 const expanded = new Set();
 const wholeCurrency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -39,17 +43,101 @@ function status(message, error = false) { el("status").textContent = message; el
 function addOption(select, text, value) { const option = node("option", text); option.value = value; select.append(option); }
 function renderReportLinks(config = DEFAULT_REPORT_SOURCE) {
   const shortLabels = ["开盘简报", "Action plan", "Premarket", "Intraday", "Preclose", "Postmarket"];
-  const links = githubReportLinks(config).map(({ label, href }, index) => {
+  const links = REPORT_TYPES.map(({ label, type }, index) => {
     const link = node("a", shortLabels[index]);
     link.title = `${label} · latest saved report; check the date inside`;
-    link.href = href;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
+    link.href = `#report/${type}`;
+    link.dataset.reportType = type;
+    if (type === selectedReport) link.setAttribute("aria-current", "page");
     return link;
   });
   el("report-links").replaceChildren(...links);
   el("report-source").textContent = `${config.repository} · ${config.ref}`;
 }
+
+function reportFromLocation() {
+  const type = window.location.hash.replace(/^#report\//, "");
+  return REPORT_TYPES.some(report => report.type === type) ? type : null;
+}
+function closeReport({ clearLocation = true, focusLink = false } = {}) {
+  const previous = selectedReport;
+  selectedReport = null;
+  reportGeneration += 1;
+  reportRequest?.abort(); reportRequest = null;
+  el("report-reader").hidden = true;
+  el("report-content").replaceChildren();
+  el("report-meta").textContent = "";
+  el("report-status").textContent = "";
+  el("report-content").setAttribute("aria-busy", "false");
+  document.body.classList.remove("reading-report");
+  if (clearLocation && window.location.hash.startsWith("#report/")) {
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }
+  renderReportLinks(credentials?.config);
+  if (focusLink && previous) el("report-links").querySelector(`[data-report-type="${previous}"]`)?.focus();
+}
+async function openReport(type, { navigate = false, focus = false } = {}) {
+  const definition = REPORT_TYPES.find(report => report.type === type);
+  if (!definition || !portfolio) return;
+  if (navigate) {
+    const method = selectedReport ? "replaceState" : "pushState";
+    window.history[method](null, "", `#report/${type}`);
+  }
+  selectedReport = type;
+  const current = ++reportGeneration;
+  reportRequest?.abort();
+  const controller = new AbortController(); reportRequest = controller;
+  const active = credentials;
+  document.body.classList.add("reading-report");
+  el("report-reader").hidden = false;
+  el("report-title").textContent = definition.label;
+  el("report-meta").textContent = "";
+  el("report-content").replaceChildren();
+  el("report-content").setAttribute("aria-busy", "true");
+  el("report-status").textContent = active ? "Loading the latest saved cloud report…" : "Connect to GitHub to read cloud reports. A local portfolio export does not include report contents.";
+  el("report-status").classList.remove("error");
+  el("report-connect").hidden = !!active;
+  el("report-refresh").disabled = true;
+  renderReportLinks(active?.config);
+  if (focus) el("report-title").focus({ preventScroll: true });
+  el("report-reader").scrollIntoView({ block: "start" });
+  try {
+    if (!active) return;
+    const report = await loadGithubReport(active.config, active.token, type, { signal: controller.signal });
+    if (current !== reportGeneration || credentials !== active) return;
+    el("report-content").innerHTML = renderReportMarkdown(report.markdown);
+    el("report-meta").textContent = `Loaded ${time(new Date().toISOString())} · Check the market date in the report.`;
+    el("report-status").textContent = report.markdown.trim() ? "" : "This cloud report is empty. Try another report type or refresh later.";
+  } catch (error) {
+    if (current !== reportGeneration || error.name === "AbortError") return;
+    el("report-status").textContent = error.message;
+    el("report-status").classList.add("error");
+  } finally {
+    if (current === reportGeneration) {
+      reportRequest = null;
+      el("report-content").setAttribute("aria-busy", "false");
+      el("report-refresh").disabled = !credentials;
+    }
+  }
+}
+el("report-links").addEventListener("click", event => {
+  const link = event.target.closest("[data-report-type]");
+  if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  void openReport(link.dataset.reportType, { navigate: true, focus: true });
+});
+el("report-back").addEventListener("click", () => closeReport({ focusLink: true }));
+el("report-refresh").addEventListener("click", () => void openReport(selectedReport));
+el("report-connect").addEventListener("click", () => {
+  el("connection").hidden = false;
+  el("connection").scrollIntoView({ block: "start" });
+  el("token").focus();
+});
+window.addEventListener("popstate", () => {
+  const type = reportFromLocation();
+  if (type) void openReport(type);
+  else closeReport({ clearLocation: false });
+});
 function renderRefreshStatus(state = refreshScheduler.state()) {
   if (!state.active) {
     el("refresh-status").textContent = portfolio ? "Local export · automatic refresh off" : "";
@@ -61,7 +149,8 @@ function renderRefreshStatus(state = refreshScheduler.state()) {
       : `Next check ${time(new Date(state.nextAt).toISOString())}`;
   el("refresh-status").textContent = `Every 15 minutes · ${last} · ${next}`;
 }
-function clearData() {
+function clearData({ preserveReportLocation = false } = {}) {
+  closeReport({ clearLocation: !preserveReportLocation });
   portfolio = null;
   sourceName = "";
   expanded.clear();
@@ -125,6 +214,7 @@ function display(data, source) {
   renderTrend();
   renderRefreshStatus();
   renderReportLinks(credentials?.config);
+  if (!selectedReport && reportFromLocation()) void openReport(reportFromLocation());
 }
 async function loadSavedExport() {
   if (!credentials) return false;
@@ -152,7 +242,7 @@ el("connect-form").addEventListener("submit", (event) => {
   refreshScheduler.stop();
   credentials = { config, token };
   token = "";
-  clearData();
+  clearData({ preserveReportLocation: true });
   refreshScheduler.start();
 });
 el("refresh").addEventListener("click", () => void refreshScheduler.runNow());
@@ -202,7 +292,14 @@ function metric(label, value, detail, valueClass = "") {
 }
 function marketMetric(label, record, fear=false) {
   const available=Number.isFinite(record?.value);
-  const item=metric(label,available?(fear?`${Math.round(record.value)}`:record.value.toFixed(2)):"—",available?`${record.status==='last-known'?'Last-known · ':''}${time(record.quoteAsOf)}`:"Saved reading unavailable");
+  const blocked = record?.reason === 'http-error' && [401,403,418,429].includes(record?.httpStatus);
+  const missingDetail = blocked ? `${fear ? 'CNN' : 'Quote'} feed temporarily unavailable` : 'No verified saved reading';
+  const item=metric(label,available?(fear?`${Math.round(record.value)}`:record.value.toFixed(2)):"Unavailable",available?`${record.status==='last-known'?'Last-known · ':''}${time(record.quoteAsOf)}`:missingDetail,available?'':'small-value unavailable');
+  const officialLink=node('a',`${label} ↗`,'market-kpi-link');
+  officialLink.href=fear?'https://www.cnn.com/markets/fear-and-greed':'https://www.cboe.com/tradable-products/vix';
+  officialLink.target='_blank';officialLink.rel='noopener noreferrer';
+  officialLink.setAttribute('aria-label',`${label} official page (opens a new tab)`);
+  item.querySelector('.label').replaceChildren(officialLink);
   if(available && fear) {
     item.querySelector('.value').classList.add('fear-score');
     item.querySelector('.value').append(node('span',`/100 · ${record.rating||'Rating unavailable'}`,'fear-rating'));
@@ -211,8 +308,8 @@ function marketMetric(label, record, fear=false) {
   } else if(available && Number.isFinite(record.change)) {
     item.querySelector('.detail').prepend(node('span',`${record.change>0?'+':''}${record.change.toFixed(2)} · `));
   }
-  if(record?.sourceUrl && /^https:\/\//.test(record.sourceUrl)) {
-    const link=node('a',record.source||'Source');link.href=record.sourceUrl;link.target='_blank';link.rel='noopener noreferrer';
+  if(available && record?.sourceUrl && /^https:\/\//.test(record.sourceUrl)) {
+    const link=node('a',String(record.source||'').toLowerCase()==='cnn'?'CNN':record.source||'Source');link.href=record.sourceUrl;link.target='_blank';link.rel='noopener noreferrer';
     item.querySelector('.detail').append(document.createTextNode(' · '),link);
   }
   return item;

@@ -1,4 +1,5 @@
 export const MAX_EXPORT_BYTES = 12 * 1024 * 1024;
+export const MAX_REPORT_BYTES = 1024 * 1024;
 export const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 export const DEFAULT_REPORT_SOURCE = Object.freeze({ repository: "yongwen/trading-app", ref: "codex/cloud-workflow" });
 
@@ -10,6 +11,8 @@ const REPORT_FILES = Object.freeze([
   ["Preclose agent", "preclose"],
   ["Postmarket agent", "postmarket"],
 ]);
+
+export const REPORT_TYPES = Object.freeze(REPORT_FILES.map(([label, type]) => Object.freeze({ type, label })));
 
 export function githubReportLinks({ repository, ref } = DEFAULT_REPORT_SOURCE) {
   githubContentsUrl({ repository, ref, path: "reports/current" });
@@ -184,6 +187,67 @@ export async function loadGithubPortfolio(config, token, { signal, fetchImpl = f
   const declaredSize = Number(response.headers.get("content-length"));
   if (declaredSize > MAX_EXPORT_BYTES) throw new Error("The export is too large. Use an export under 12 MB.");
   return parsePortfolioExport(await response.text());
+}
+
+export async function loadGithubReport(config, token, type, { signal, fetchImpl = fetch } = {}) {
+  const report = REPORT_TYPES.find((entry) => entry.type === type);
+  if (!report) throw new Error("Choose one of the available report types.");
+  // Validate the configured repository/ref independently of any report or export content.
+  githubReportLinks(config);
+  const { repository, ref } = config;
+  const path = `reports/current/${type}.md`;
+  const url = githubContentsUrl({ repository, ref, path });
+  if (typeof token !== "string" || !token.trim() || /\s/.test(token)) throw new Error("Connect with a valid read-only GitHub token to read cloud reports.");
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method: "GET", cache: "no-store", credentials: "omit", redirect: "error", referrerPolicy: "no-referrer", signal,
+      headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "2022-11-28" },
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    throw new Error("Could not reach GitHub. Check your connection and retry the report.");
+  }
+  if (!response.ok) {
+    const messages = {
+      401: "GitHub did not accept this token. Connect again with a valid read-only token.",
+      403: "GitHub denied this report request. Check repository access, organization approval and API rate limits.",
+      404: "This report has not been published on the selected branch, or the token cannot read it.",
+      429: "GitHub is rate limiting requests. Wait before refreshing the report.",
+    };
+    throw new Error(messages[response.status] || `GitHub could not load the report (HTTP ${response.status}).`);
+  }
+  const maxResponseBytes = MAX_REPORT_BYTES * 2 + 8192;
+  const tooLarge = "This report is too large to display. Reports must be under 1 MB.";
+  if (Number(response.headers.get("content-length")) > maxResponseBytes) throw new Error(tooLarge);
+  let body;
+  try { body = await response.text(); }
+  catch (error) {
+    if (error?.name === "AbortError") throw error;
+    throw new Error("Could not finish loading the report. Please retry.");
+  }
+  if (new TextEncoder().encode(body).byteLength > maxResponseBytes) throw new Error(tooLarge);
+  let data;
+  try { data = JSON.parse(body); } catch { throw new Error("GitHub returned an unreadable report. Please retry."); }
+  if (!data || data.type !== "file" || data.path !== path || data.name !== `${type}.md`
+    || typeof data.sha !== "string" || !/^[a-f0-9]{40}$/i.test(data.sha)
+    || !Number.isSafeInteger(data.size) || data.size < 0) {
+    throw new Error("GitHub returned unexpected report data. Please retry.");
+  }
+  if (data.size > MAX_REPORT_BYTES) throw new Error(tooLarge);
+  if (data.encoding !== "base64" || typeof data.content !== "string") {
+    throw new Error("GitHub returned an unreadable report. Please retry.");
+  }
+  let markdown;
+  try {
+    const encoded = data.content.replace(/\s/g, "");
+    if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new Error();
+    const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+    if (bytes.byteLength !== data.size || bytes.byteLength > MAX_REPORT_BYTES) throw new Error();
+    markdown = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch { throw new Error("GitHub returned an unreadable report. Please retry."); }
+  if (!markdown.trim()) throw new Error("This report is empty. Try another report or refresh after it is published.");
+  return { type, label: report.label, path, markdown, sha: data.sha, repository, ref };
 }
 
 export function scopeTotals(data, account = "") {
