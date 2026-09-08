@@ -112,14 +112,49 @@ export function parsePortfolioExport(text) {
     if (!row || typeof row !== "object" || typeof row.symbol !== "string" || typeof row.account !== "string") {
       throw new Error("The export contains an invalid holding record.");
     }
-    for (const key of ["quantity", "multiplier", "price", "marketValue", "costBasis", "unrealizedPnl", "notionalValue"]) {
+    for (const key of ["quantity", "multiplier", "price", "marketValue", "costBasis", "unrealizedPnl", "notionalValue",
+      "avgCost", "effectiveAvgCost", "planValue", "planDrift", "dte", "previousClose", "changePercent", "dailyPnl",
+      "optionIv", "optionDelta", "underlyingPrice", "strikeDeltaPercent", "extrinsicValue"]) {
       if (row[key] != null && (typeof row[key] !== "number" || !Number.isFinite(row[key]))) {
         throw new Error("The export contains an invalid numeric holding value.");
       }
     }
+    if ((row.dte != null && (!Number.isInteger(row.dte) || row.dte < 0)) || (row.planValue != null && row.planValue < 0)
+      || (row.previousClose != null && row.previousClose <= 0) || (row.optionIv != null && row.optionIv < 0)
+      || (row.optionDelta != null && Math.abs(row.optionDelta) > 1) || (row.underlyingPrice != null && row.underlyingPrice <= 0)
+      || (row.extrinsicValue != null && row.extrinsicValue < 0)) {
+      throw new Error("The export contains an invalid numeric holding value.");
+    }
   }
   if (data.accounts.some((row) => !row || typeof row !== "object" || typeof row.account !== "string")) {
     throw new Error("The export contains an invalid account record.");
+  }
+  for (const totals of [data.totals, ...data.accounts]) {
+    for (const key of ["dailyPnl", "coveredDailyPnl", "dailyPnlPositionCount", "dailyPnlCoveredPositionCount"]) {
+      if (totals[key] != null && (typeof totals[key] !== "number" || !Number.isFinite(totals[key]))) {
+        throw new Error("The export contains an invalid aggregate value.");
+      }
+    }
+  }
+  if (data.marketData != null) {
+    const market = data.marketData;
+    if (typeof market !== "object" || Array.isArray(market)
+      || (market.benchmarks != null && (typeof market.benchmarks !== "object" || Array.isArray(market.benchmarks)))) {
+      throw new Error("The export contains invalid market data.");
+    }
+    for (const [key, record] of [["vix", market.vix], ["fearGreed", market.fearGreed],
+      ...["QQQ", "SPY", "SOXX"].map((symbol) => [symbol, market.benchmarks?.[symbol]])]) {
+      if (record == null) continue;
+      if (typeof record !== "object" || Array.isArray(record)) throw new Error("The export contains invalid market data.");
+      for (const field of ["value", "change", "changePercent"]) {
+        if (record[field] != null && (typeof record[field] !== "number" || !Number.isFinite(record[field]))) {
+          throw new Error("The export contains an invalid market value.");
+        }
+      }
+      if (record.value != null && (record.value < 0 || (key === "fearGreed" && record.value > 100))) {
+        throw new Error("The export contains an invalid market value.");
+      }
+    }
   }
   return data;
 }
