@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src https://api.github.com; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>AI-Trader · Portfolio viewer</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="./icon.svg" width="34" height="34" alt=""><div><h1>AI-Trader <span>Portfolio</span></h1><p>Saved portfolio</p></div></div>
+    <div class="top-actions"><span class="badge">Read only</span><button id="refresh" hidden>Refresh</button><button id="disconnect" hidden>Disconnect</button></div>
+  </header>
+  <main>
+    <section class="connect-panel panel" id="connection">
+      <div class="intro"><p class="eyebrow">YOUR PORTFOLIO, FROM GITHUB</p><h2>Connect your private records</h2><p>View the latest saved holdings, valuations and snapshots. Data loads directly from your private repository into this browser.</p><p class="small">Use a fine-grained GitHub token with <strong>Contents: read-only</strong> for this repository. The token stays in memory until you disconnect or reload.</p></div>
+      <form id="connect-form" autocomplete="off">
+        <div class="form-grid"><label>Repository<input id="repository" value="yongwen/trading-app" required autocomplete="off" spellcheck="false" placeholder="owner/repository"></label><label>Branch or commit<input id="ref" value="codex/cloud-workflow" required autocomplete="off" spellcheck="false"></label></div>
+        <label>Portfolio export path<input id="path" value="cloud/portfolio-view.json" required autocomplete="off" spellcheck="false"></label>
+        <label>Read-only access token<input id="token" type="password" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_…"></label>
+        <div class="form-actions"><button type="submit" class="primary" id="connect">Connect to GitHub</button><span>or</span><label class="file-button">Open local export<input id="file" type="file" accept=".json,application/json"></label></div>
+        <p class="small">Local files stay in this browser. No broker connections or portfolio edits.</p>
+      </form>
+    </section>
+    <p class="notice" id="status" role="status" aria-live="polite">Connect a repository or open a portfolio-view.json export to begin.</p>
+    <section class="panel reports-panel" aria-labelledby="reports-title">
+      <div class="section-heading"><h2 id="reports-title">Latest reports</h2><span class="small" id="report-source"></span></div>
+      <nav class="report-links" id="report-links" aria-label="Latest portfolio reports"></nav>
+      <p class="small">Latest saved copy of each report. Check the date inside. Links open in a new tab; sign in to GitHub to view private reports.</p>
+    </section>
+    <section id="dashboard" hidden aria-label="Portfolio dashboard">
+      <div class="dashboard-heading"><div><p class="eyebrow" id="source-label"></p><h2>Your portfolio</h2><p id="updated" class="muted"></p><p id="quote-freshness" class="muted"></p><p id="refresh-status" class="muted" aria-live="polite"></p></div><label class="scope-label">Account scope<select id="account"><option value="">All accounts</option></select></label></div>
+      <div id="warnings" class="warning-box" hidden></div>
+      <div id="metrics" class="metrics"></div>
+      <div class="overview-grid">
+        <section class="panel allocation-panel"><div class="section-heading"><h3>Marked exposure</h3><span class="small">By asset class</span></div><p class="small">Bars use absolute marked value. Amounts retain their sign; cash is included and futures are excluded.</p><div id="allocation"></div></section>
+        <section class="panel trend-panel"><div class="section-heading"><h3>Portfolio snapshots</h3><span id="snapshot-count" class="small"></span></div><p class="small">All accounts · saved valuations, not a return calculation</p><div id="trend" class="trend"></div><p id="trend-note" class="small"></p></section>
+      </div>
+      <section id="action-panel" class="panel action-panel" hidden><div class="section-heading"><h3>Saved action note</h3><span id="action-date" class="small"></span></div><p id="action-text"></p></section>
+      <section class="panel holdings-panel">
+        <div class="section-heading holdings-heading"><div><h3>Holdings</h3><p id="holdings-count" class="small"></p></div><div class="filters"><label class="pricing-filter"><input id="unpriced" type="checkbox">Unpriced only</label><input id="search" aria-label="Search holdings" placeholder="Search symbol, sector…" type="search"><select id="asset" aria-label="Filter asset class"><option value="">All asset classes</option></select></div></div>
+        <div class="table-wrap"><table><thead><tr><th scope="col"><button data-sort="symbol">Holding</button></th><th scope="col"><button data-sort="account">Account</button></th><th scope="col" class="number"><button data-sort="quantity">Quantity</button></th><th scope="col" class="number"><button data-sort="price">Mark</button></th><th scope="col" class="number" aria-sort="descending"><button data-sort="marketValue">Value ↓</button></th><th scope="col" class="number"><button data-sort="unrealizedPnl">Unrealized P&amp;L</button></th><th scope="col">Mark evidence</th></tr></thead><tbody id="holdings"></tbody></table></div>
+      </section>
+      <footer><p>Read-only view of saved app records. Quote times can differ. Brokerage reconciliation is not verified by this viewer.</p><p id="source-detail"></p></footer>
+    </section>
+  </main>
+</body>
+</html>
