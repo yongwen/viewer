@@ -43,6 +43,36 @@ export function compareValues(a,b,descending=false) {
   const delta=typeof a==='number'&&typeof b==='number'?a-b:String(a).localeCompare(String(b),undefined,{numeric:true});
   return descending?-delta:delta;
 }
+export function aggregateStockRows(rows) {
+  const groups=new Map(), other=[];
+  for(const row of rows) {
+    if(row.assetClass!=='stock') { other.push(row); continue; }
+    const key=JSON.stringify([row.symbol,row.multiplier??1,row.includedInPortfolioValue!==false]);
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(row);
+  }
+  return [...groups.values()].map(parts=>{
+    if(parts.length===1)return {...parts[0],allocationRows:parts};
+    const common=field=>parts.every(row=>row[field]===parts[0][field])?parts[0][field]:null;
+    const sum=field=>parts.every(row=>Number.isFinite(row[field]))?parts.reduce((total,row)=>total+row[field],0):null;
+    const row={...parts[0],id:`aggregate:${parts[0].symbol}`,allocationRows:parts,
+      account:`${new Set(parts.map(p=>p.account)).size} accounts`,sector:common('sector')||'Mixed',
+      warnings:[...new Set(parts.flatMap(p=>p.warnings||[]))]};
+    for(const field of ['quantity','marketValue','costBasis','unrealizedPnl','planValue','planDrift','dailyPnl','portfolioPercent'])row[field]=sum(field);
+    // Different account marks remain visible in the details; do not select one
+    // account's quote or percentage as the quote for the whole holding.
+    for(const field of ['price','changePercent','previousClose','previousCloseSessionDate','quoteAsOf','quoteSessionDate','quoteSource','quoteProvider','quoteFeed','priceKind'])row[field]=common(field);
+    row.quoteStatus=common('quoteStatus')||'mixed';
+    if(row.price===null)row.warnings.push('Account marks differ or are unavailable; total value sums only when every account has a value.');
+    const sameSign=parts.filter(p=>p.quantity!==0).every(p=>Math.sign(p.quantity)===Math.sign(row.quantity));
+    row.avgCost=sameSign&&row.quantity!==null&&row.quantity!==0&&row.costBasis!==null
+      ? row.costBasis/(row.quantity*(row.multiplier??1)):common('avgCost');
+    if(!sameSign)row.avgCost=null;
+    row.pnlPercent=row.unrealizedPnl!==null&&row.costBasis!==null&&row.costBasis!==0?row.unrealizedPnl/Math.abs(row.costBasis)*100:null;
+    row.planAllocationBasis='Sum of saved account allocations in the selected scope';
+    return row;
+  }).concat(other);
+}
 export function groupedHoldings(rows,{key='symbol',descending=false,search='',asset='',unpriced=false}={}) {
   const needle=search.trim().toLowerCase(), groups=new Map();
   for(const row of rows) {if(!groups.has(row.symbol))groups.set(row.symbol,[]);groups.get(row.symbol).push(row);}
@@ -53,7 +83,7 @@ export function groupedHoldings(rows,{key='symbol',descending=false,search='',as
     const matched=group.filter(row=>(!asset||row.assetClass===asset)
       &&(!unpriced||(row.includedInPortfolioValue!==false&&!Number.isFinite(row.marketValue)))
       &&(!needle||[row.symbol,row.account,row.sector,row.assetClass,row.optionType,row.expiration,row.strike].some(v=>String(v??'').toLowerCase().includes(needle))));
-    const parents=matched.filter(row=>row.assetClass!=='option').sort(compareRows);
+    const parents=aggregateStockRows(matched.filter(row=>row.assetClass!=='option')).sort(compareRows);
     const options=matched.filter(row=>row.assetClass==='option').sort(compareRows);
     const candidates=OPTION_SORT_KEYS.has(key)?options:parents.length?parents:options;
     const sortValue=key==='symbol'?symbol:candidates.map(row=>row[key]).filter(v=>v!=null).sort((a,b)=>compareValues(a,b,descending))[0]??null;
