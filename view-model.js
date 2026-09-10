@@ -95,3 +95,11 @@ export function shortPutNotional(rows) {
   if(puts.some(row=>!Number.isFinite(row.strike)||!Number.isFinite(row.multiplier)))return null;
   return puts.reduce((sum,row)=>sum-row.quantity*row.strike*row.multiplier,0);
 }
+
+// Use the portfolio's sector classification, including cash balances and bills.
+export function cashSectorValue(positions) {
+  const rows = positions.filter(row => String(row.sector || '').trim().toLowerCase() === 'cash'
+    && row.includedInPortfolioValue !== false);
+  if (!rows.length || rows.some(row => !Number.isFinite(row.marketValue))) return null;
+  return rows.reduce((total, row) => total + row.marketValue, 0);
+}

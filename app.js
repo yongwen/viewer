@@ -1,5 +1,5 @@
 import { loadGithubPortfolio, loadGithubReport, REPORT_TYPES, parsePortfolioExport, githubContentsUrl, githubReportLinks, DEFAULT_REPORT_SOURCE, markedAllocation, scopeTotals, displayUnrealizedPnl, needsValuation, markEvidence, valuationPresentation, createRefreshScheduler, MAX_EXPORT_BYTES } from "./loader.js";
-import { COLUMNS, OPTION_SORT_KEYS, positionDisplay, groupedHoldings, shortPutNotional, newYorkDate } from "./view-model.js";
+import { COLUMNS, OPTION_SORT_KEYS, positionDisplay, groupedHoldings, shortPutNotional, cashSectorValue, newYorkDate } from "./view-model.js";
 import { renderReportMarkdown } from "./report-markdown.js";
 
 const el = (id) => document.getElementById(id);
@@ -339,11 +339,12 @@ function renderScope() {
   const pnl = displayUnrealizedPnl(positions, totals);
   const pnlBasis=positions.filter(row=>Number.isFinite(row.unrealizedPnl)&&Number.isFinite(row.costBasis)).reduce((sum,row)=>sum+Math.abs(row.costBasis),0);
   const daily=Number.isFinite(totals.dailyPnl)?totals.dailyPnl:totals.coveredDailyPnl;
+  const cashEquivalentValue=cashSectorValue(positions);
   el("metrics").replaceChildren(
     metric(valuation.label, money(value),complete?(el('account').value||'All accounts'):'Subtotal · incomplete',complete?'':'caution'),
     metric(Number.isFinite(totals.unrealizedPnl)?"Unrealized P&L":"Covered unrealized P&L",signedMoney(pnl),Number.isFinite(pnl)&&pnlBasis?`${percent(pnl/pnlBasis*100)} · recorded cost`:'Saved marks and cost required',tone(pnl)),
     metric(totals.dailyPnlComplete?'Daily P&L':Number.isFinite(daily)?'Covered daily P&L':'Daily P&L',signedMoney(daily),totals.dailyPnlComplete?'Saved session vs prior close':Number.isFinite(daily)?'Partial · eligible saved quotes':'Prior-close evidence unavailable',tone(daily)),
-    metric('Cash',totals.cashRecorded?money(totals.cash):'—',totals.cashRecorded?'Recorded balance':'Not recorded'),
+    metric('Cash equivalents',money(cashEquivalentValue),cashEquivalentValue===null?'Sector: cash · unavailable':'Sector: cash'),
   );
   renderMarkets(positions);
   el('coverage-summary').textContent=`· ${number(totals.valuedPositionCount)} / ${positions.filter(row=>row.includedInPortfolioValue!==false).length} valued${!complete?' · incomplete subtotal':''}${valuation.lastKnownCount?` · ${valuation.lastKnownCount} last-known`:''}`;
