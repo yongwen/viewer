@@ -6,20 +6,25 @@ const amount = value => number(value) === null ? 'Unknown' : String(number(value
 const terminal = new Set(['FILLED','CANCELED','CANCELLED','REPLACED','REJECTED','EXPIRED','FAILED']);
 
 export function openOrdersFromReports(reports) {
-  const report = reports.filter(r => r && r.brokerEvidence && Number.isFinite(Date.parse(r.generatedAt)))
-    .sort((a,b) => Date.parse(b.generatedAt)-Date.parse(a.generatedAt))[0];
+  const orderedReports = reports.filter(r => r && r.brokerEvidence && Number.isFinite(Date.parse(r.generatedAt)))
+    .sort((a,b) => Date.parse(b.generatedAt)-Date.parse(a.generatedAt));
+  const report = orderedReports[0];
   if (!report) return null;
-  const evidence = report.brokerEvidence;
-  const orders = [], coverage = [];
+  const orders = [], coverage = [], checkedTimes = [];
   for (const [key, broker] of [['schwab','Schwab'],['robinhood','Robinhood']]) {
+    const sourceReport = orderedReports.find(r => Array.isArray(r.brokerEvidence[key]?.orders));
+    const evidence = sourceReport?.brokerEvidence || report.brokerEvidence;
     const source = evidence[key];
     if (!source || !Array.isArray(source.orders)) {
       coverage.push(`${broker}: order evidence unavailable in this report.`);
       continue;
     }
+    const checked = text(evidence.collectionWindow?.end || evidence.generatedAt || sourceReport.generatedAt);
+    if (Number.isFinite(Date.parse(checked))) checkedTimes.push(checked);
+    if (sourceReport !== report) coverage.push(`${broker}: retained evidence from ${sourceReport.generatedAt}; the latest report did not refresh this broker.`);
     coverage.push(`${broker}: ${source.orders.length} saved orders. ${key === 'schwab'
       ? text(source.olderGtcCoverage) || 'Older GTC coverage is unverified.'
-      : source.workingPaginationComplete === true ? 'Working-order pagination completed.' : 'Complete working-order coverage is unverified.'}`);
+      : source.workingPaginationComplete === true || source.paginationComplete === true ? 'Working-order pagination completed.' : 'Complete working-order coverage is unverified.'}`);
     if (key === 'schwab' && Array.isArray(source.accounts)) {
       for (const account of source.accounts) coverage.push(`${text(account.account)}: ${amount(account.activeNodes)} active in queried window${account.possiblyTruncated ? '; response truncated' : ''}.`);
     }
@@ -47,7 +52,7 @@ export function openOrdersFromReports(reports) {
         status:text(order.status) || 'Unknown', checkedAt:text(order.checkedAt || evidence.collectionWindow?.end || evidence.generatedAt)});
     }
   }
-  return {version:1,reportGeneratedAt:report.generatedAt,checkedAt:text(evidence.collectionWindow?.end || evidence.generatedAt),orders,coverage};
+  return {version:1,reportGeneratedAt:report.generatedAt,checkedAt:checkedTimes.sort((a,b)=>Date.parse(a)-Date.parse(b))[0] || '',orders,coverage};
 }
 
 export function renderOpenOrders(snapshot, {account = '', now = Date.now()} = {}) {
