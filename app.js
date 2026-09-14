@@ -1,6 +1,7 @@
 import { loadGithubPortfolio, loadGithubReport, REPORT_TYPES, parsePortfolioExport, githubContentsUrl, githubReportLinks, DEFAULT_REPORT_SOURCE, markedAllocation, scopeTotals, displayUnrealizedPnl, needsValuation, markEvidence, valuationPresentation, createRefreshScheduler, MAX_EXPORT_BYTES } from "./loader.js";
 import { COLUMNS, OPTION_SORT_KEYS, positionDisplay, groupedHoldings, shortPutNotional, cashSectorValue, newYorkDate } from "./view-model.js";
 import { renderReportMarkdown } from "./report-markdown.js";
+import { renderOpenOrders } from './open-orders.js';
 
 const el = (id) => document.getElementById(id);
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -152,6 +153,7 @@ function renderRefreshStatus(state = refreshScheduler.state()) {
 function clearData({ preserveReportLocation = false } = {}) {
   closeReport({ clearLocation: !preserveReportLocation });
   portfolio = null;
+  el('open-orders-content').replaceChildren();
   sourceName = "";
   expanded.clear();
   el("dashboard").hidden = true;
@@ -331,6 +333,7 @@ function scopedPositions() {
 }
 function renderScope() {
   if (!portfolio) return;
+  el('open-orders-content').innerHTML = renderOpenOrders(portfolio.openOrders, {account: el('account').value});
   const positions = scopedPositions();
   const totals = scopeTotals(portfolio, el("account").value);
   const valuation = valuationPresentation(totals, positions);

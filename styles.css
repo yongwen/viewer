@@ -27,3 +27,18 @@ body.reading-report .reports-panel{position:sticky;top:0;z-index:3;box-shadow:0 
 @media(max-width:470px){.report-reader{padding:12px;scroll-margin-top:110px}.report-heading{gap:9px}.report-heading h2{font-size:15px;order:3;width:100%}.report-content{font-size:13px}.report-content h1{font-size:21px}.report-content h2{font-size:18px}}
 .metric .label .market-kpi-link{color:inherit;text-decoration:none}.metric .label .market-kpi-link:hover{color:var(--blue);text-decoration:underline}
 .allocation-trigger{border:0;border-bottom:1px dotted var(--muted);border-radius:0;background:transparent;color:inherit;padding:2px 0;font:inherit;min-height:0}.allocation-trigger:hover,.allocation-trigger:focus-visible{color:var(--blue);background:transparent}.allocation-popup{position:fixed;z-index:1000;max-width:calc(100vw - 16px);padding:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px #0008;color:var(--text);pointer-events:none}.allocation-popup>strong{font-size:12px}.allocation-popup table{min-width:0;width:auto;margin-top:8px;font-size:11px}.allocation-popup th,.allocation-popup td{position:static;min-width:0;padding:6px 9px;background:transparent}.allocation-popup th:first-child,.allocation-popup td:first-child{text-align:left}.allocation-popup th:not(:first-child),.allocation-popup td:not(:first-child){text-align:right}.allocation-popup tbody tr:last-child td{border-bottom:0}
+
+/* Order and report cells wrap independently, including long contract text. */
+.open-orders-panel { margin: 10px 0; padding: 12px; min-width: 0; border: 1px solid var(--line); border-radius: 8px; }
+.open-orders-panel > summary { cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.open-orders-note, .open-orders-coverage { font-size: 12px; line-height: 1.5; margin: 8px 0; overflow-wrap: anywhere; }
+.open-orders-scroll { width: 100%; overflow-x: auto; }
+.open-orders-panel .open-orders-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; white-space: normal; font-size: 12px; }
+.open-orders-table caption { text-align: left; padding: 6px 0; }
+.open-orders-panel .open-orders-table th, .open-orders-panel .open-orders-table td { min-width: 0; width: auto; max-width: none; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; text-align: left; vertical-align: top; padding: 8px; }
+.open-orders-panel .open-orders-table th:nth-child(2) { width: 35%; }
+.open-orders-table small { display: block; margin-top: 4px; color: var(--muted); }
+@media(max-width:600px) { .open-orders-panel { padding: 8px; } .open-orders-panel .open-orders-table th, .open-orders-panel .open-orders-table td { padding: 5px; font-size: 11px; } }
+
+.report-content table, body.extended-columns .report-content table { min-width: 0; width: 100%; table-layout: fixed; }
+.report-content th, .report-content td { white-space: normal; overflow-wrap: anywhere; word-break: normal; }

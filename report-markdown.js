@@ -135,7 +135,8 @@ function renderBlocks(lines, depth = 0) {
     }
     const table = tableAt(lines, index);
     if (table) {
-      const cells = (values, tag) => table.headers.map((_, cellIndex) => `<${tag}${table.alignment[cellIndex] ? ` class="align-${table.alignment[cellIndex]}"` : ''}>${inline(values[cellIndex] || '')}</${tag}>`).join('');
+      const visibleColumns = table.headers.map((header, index) => ({header,index})).filter(({header}) => !/^(?:broker\s+)?order\s*id$/i.test(header.replace(/[*_`]/g, '').trim()));
+      const cells = (values, tag) => visibleColumns.map(({index: cellIndex}) => `<${tag}${table.alignment[cellIndex] ? ` class="align-${table.alignment[cellIndex]}"` : ''}>${inline(values[cellIndex] || '')}</${tag}>`).join('');
       const rows = [];
       index += 2;
       while (index < lines.length && lines[index].trim() && lines[index].includes('|')) rows.push(`<tr>${cells(tableCells(lines[index++]), 'td')}</tr>`);
