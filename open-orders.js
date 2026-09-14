@@ -29,7 +29,22 @@ export function openOrdersFromReports(reports) {
       for (const account of source.accounts) coverage.push(`${text(account.account)}: ${amount(account.activeNodes)} active in queried window${account.possiblyTruncated ? '; response truncated' : ''}.`);
     }
     const seen = new Set();
-    for (const order of source.orders) {
+    for (const current of source.orders) {
+      let order = current;
+      if (order && order.brokerOrderId) {
+        const earlier = orderedReports.filter(r => Date.parse(r.generatedAt) < Date.parse(sourceReport.generatedAt))
+          .map(r => ({report:r, order:r.brokerEvidence[key]?.orders?.find(o => o.brokerOrderId === order.brokerOrderId && o.account === order.account && o.symbol === order.symbol)}))
+          .find(found => found.order && (found.order.side || found.order.legs?.length));
+        if (earlier) {
+          const retainedFields = ['side','status','direction','legs'].filter(field => order[field] == null && earlier.order[field] != null);
+          if (retainedFields.length) {
+            const priorTime = text(earlier.order.checkedAt || earlier.report.brokerEvidence.collectionWindow?.end || earlier.report.generatedAt);
+            order = {...order, ...Object.fromEntries(retainedFields.map(field => [field, earlier.order[field]])), checkedAt:priorTime};
+            if (Number.isFinite(Date.parse(priorTime))) checkedTimes.push(priorTime);
+            coverage.push(`${broker} ${text(order.account)} ${text(order.symbol)}: retained ${retainedFields.join(', ')} from ${priorTime}; newer quantities and prices are used when supplied.`);
+          }
+        }
+      }
       if (!order || terminal.has(String(order.status).toUpperCase())) continue;
       const identity = order.brokerOrderId ? `${order.account}:${order.brokerOrderId}` : null;
       if (identity && seen.has(identity)) continue;
@@ -44,9 +59,11 @@ export function openOrdersFromReports(reports) {
           text(leg.underlyingSymbol || order.symbol), expiry,
           strike != null ? `$${amount(strike)} ${kind}` : ''].filter(Boolean).join(' ');
       });
+      const quantity=number(order.quantity), filled=number(order.filledQuantity);
+      const remaining=number(order.remainingQuantity) ?? (quantity !== null && filled !== null && quantity >= filled && filled >= 0 ? Number((quantity-filled).toPrecision(12)) : null);
       orders.push({broker, account:text(order.account), symbol:text(order.symbol),
         action:legs.length ? legs.join('\n') : `${text(order.side).toUpperCase()} ${text(order.symbol)}`,
-        quantity:number(order.quantity), filled:number(order.filledQuantity), remaining:number(order.remainingQuantity),
+        quantity, filled, remaining,
         price:[order.limitPrice != null ? `Limit $${amount(order.limitPrice)}` : '', order.stopPrice != null ? `Stop $${amount(order.stopPrice)}` : '', text(order.direction)].filter(Boolean).join(' · ') || 'Market / price unavailable',
         duration:['gtc','good_till_cancel'].includes(String(order.timeInForce).toLowerCase()) ? 'GTC' : ['gfd','day'].includes(String(order.timeInForce).toLowerCase()) ? 'Day' : text(order.timeInForce) || 'Unknown',
         status:text(order.status) || 'Unknown', checkedAt:text(order.checkedAt || evidence.collectionWindow?.end || evidence.generatedAt)});
