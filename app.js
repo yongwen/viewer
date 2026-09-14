@@ -1,7 +1,7 @@
 import { loadGithubPortfolio, loadGithubReport, REPORT_TYPES, parsePortfolioExport, githubContentsUrl, githubReportLinks, DEFAULT_REPORT_SOURCE, markedAllocation, scopeTotals, displayUnrealizedPnl, needsValuation, markEvidence, valuationPresentation, createRefreshScheduler, MAX_EXPORT_BYTES } from "./loader.js";
 import { COLUMNS, OPTION_SORT_KEYS, positionDisplay, groupedHoldings, shortPutNotional, cashSectorValue, newYorkDate } from "./view-model.js";
 import { renderReportMarkdown } from "./report-markdown.js";
-import { renderOpenOrders } from './open-orders.js';
+import { pendingOrderText, pendingOrdersSource } from './open-orders.js';
 
 const el = (id) => document.getElementById(id);
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -333,7 +333,7 @@ function scopedPositions() {
 }
 function renderScope() {
   if (!portfolio) return;
-  el('open-orders-content').innerHTML = renderOpenOrders(portfolio.openOrders, {account: el('account').value});
+  el('open-orders-content').textContent = pendingOrdersSource(portfolio.openOrders);
   const positions = scopedPositions();
   const totals = scopeTotals(portfolio, el("account").value);
   const valuation = valuationPresentation(totals, positions);
@@ -419,7 +419,7 @@ function renderHoldings() {
   hideAllocation();
   const scope = scopedPositions();
   const totals=scopeTotals(portfolio,el('account').value), valuation=valuationPresentation(totals,scope);
-  const positions=scope.map(row=>positionDisplay(row,{total:totals.portfolioValue,complete:valuation.complete}));
+  const positions=scope.map(row=>({...positionDisplay(row,{total:totals.portfolioValue,complete:valuation.complete}),pendingOrder:pendingOrderText(portfolio.openOrders,row)}));
   const groups=groupedHoldings(positions,{...sort,search:el('search').value,asset:el('asset').value,unpriced:el('unpriced').checked});
   const visibleColumns=COLUMNS.filter(column=>!column.extra||el('option-columns').checked);
   const matched=groups.reduce((sum,g)=>sum+g.matchedCount,0);
@@ -453,7 +453,12 @@ function renderHoldings() {
           tr.addEventListener('mouseleave',()=>{if(!tr.contains(document.activeElement))hideAllocation();});
         }
       }
-      else {const cell=node('td','Options only · no matching stock position','muted');cell.colSpan=visibleColumns.length-1;cell.classList.add('group-context');tr.append(cell);}
+      else {
+        for(const column of COLUMNS.slice(1)) {
+          const cell=node('td',column.key==='pendingOrder' ? pendingOrderText(portfolio.openOrders,{symbol:group.symbol}, {group:true,accounts:group.options.map(p=>p.account)}) || '—' : '—',column.extra?'option-col':'muted');
+          cell.dataset.column=column.key;tr.append(cell);
+        }
+      }
       tbody.append(tr);
     });
     if(open) for(const row of group.options) {
@@ -472,7 +477,10 @@ function appendHoldingCells(tr,row) {
   for(const column of COLUMNS.slice(1)) {
     const key=column.key, val=row[key];
     const td=node('td',null,column.extra?'option-col':'');td.dataset.column=key;
-    if(key==='price') {
+    if(key==='pendingOrder') {
+      td.textContent=pendingOrderText(portfolio.openOrders,row)||'—';
+      td.title='Saved broker orders matched to this holding and account. Pending trades have not changed the recorded position.';
+    } else if(key==='price') {
       const evidence=markEvidence(row),details=node('details',null,'quote-details');
       details.append(node('summary',price(row.price)));
       const lines=[evidence.label,evidence.book?'Recorded balance':evidence.date?time(evidence.date):evidence.session?'Session '+evidence.session:'Quote time unavailable',...(row.warnings||[])];

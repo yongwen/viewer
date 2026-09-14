@@ -1,6 +1,6 @@
 // Display-only helpers; never mutate saved records or infer missing targets.
 export const COLUMNS = Object.freeze([
-  ['symbol','Ticker'], ['quantity','Position'], ['price','Quote'], ['changePercent','Change'],
+  ['symbol','Ticker'], ['quantity','Position'], ['pendingOrder','Pending order'], ['price','Quote'], ['changePercent','Change'],
   ['strikeDeltaPercent','Strike%',true], ['dte','DTE'], ['optionIv','IV',true], ['optionDelta','Delta',true], ['extrinsicValue','Extrinsic',true],
   ['avgCost','Avg cost'], ['effectiveAvgCost','Eff. cost',true], ['marketValue','Total value'], ['planValue','Plan value'], ['planDrift','Drift'],
   ['unrealizedPnl','P&L total'], ['pnlPercent','P&L %'], ['dailyPnl','P&L daily'], ['portfolioPercent','Portfolio %'], ['sector','Sector'], ['account','Account'],
@@ -69,6 +69,7 @@ export function aggregateStockRows(rows) {
       ? row.costBasis/(row.quantity*(row.multiplier??1)):common('avgCost');
     if(!sameSign)row.avgCost=null;
     row.pnlPercent=row.unrealizedPnl!==null&&row.costBasis!==null&&row.costBasis!==0?row.unrealizedPnl/Math.abs(row.costBasis)*100:null;
+    row.pendingOrder=[...new Set(parts.map(p=>p.pendingOrder).filter(Boolean))].join('\n\n');
     row.planAllocationBasis='Sum of saved account allocations in the selected scope';
     return row;
   }).concat(other);

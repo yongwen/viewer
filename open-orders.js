@@ -61,3 +61,38 @@ export function renderOpenOrders(snapshot, {account = '', now = Date.now()} = {}
     + (rows.length ? `<div class="open-orders-scroll"><table class="open-orders-table"><caption>Open orders${account ? ` · ${escape(account)}` : ' · all accounts'}</caption><thead><tr>${headings.map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows.map(o=>`<tr><td>${escape(o.broker)}<br>${escape(o.account)}</td><td>${escape(o.action).replaceAll('\n','<br>')}</td><td>${[o.quantity,o.filled,o.remaining].map(amount).join(' / ')}</td><td>${escape(o.price)}<small>Quoted units; option rolls are net.</small></td><td>${escape(o.duration)}<br>${escape(o.status)}</td></tr>`).join('')}</tbody></table></div>` : '<p>No saved open orders for this account scope. See coverage below.</p>')
     + `<details class="open-orders-coverage"><summary>Source coverage</summary>${(snapshot.coverage || []).map(note=>`<p>${escape(note)}</p>`).join('')}</details>`;
 }
+
+const accountKey = value => String(value || '').trim().toLowerCase();
+export function ordersForHolding(snapshot, row, {group = false, accounts} = {}) {
+  const symbol = String(row?.symbol || '').toUpperCase();
+  if (!symbol || !Array.isArray(snapshot?.orders)) return [];
+  const owners = new Set((accounts || row.allocationRows?.map(p=>p.account)
+    || row.accountAllocations?.map(p=>p.account) || [row.account]).map(accountKey));
+  return snapshot.orders.filter(order => {
+    if (String(order.symbol || '').toUpperCase() !== symbol || !owners.has(accountKey(order.account))
+      || terminal.has(String(order.status).toUpperCase()) || order.remaining === 0) return false;
+    if (group || row.assetClass !== 'option') return true;
+    // The saved display projection uses one canonical line per leg. Match the
+    // full contract, not a strike substring or another account's underlying.
+    return String(order.action || '').split('\n').some(line => {
+      const contract = /(?:^|\s)([A-Za-z0-9.^/-]+) (\d{4}-\d{2}-\d{2}) \$(\d+(?:\.\d+)?) (put|call)$/i.exec(line);
+      return contract && contract[1].toUpperCase() === symbol && contract[2] === row.expiration
+        && Number(contract[3]) === Number(row.strike) && contract[4].toLowerCase() === String(row.optionType).toLowerCase();
+    });
+  });
+}
+
+export function pendingOrderText(snapshot, row, options = {}) {
+  return ordersForHolding(snapshot, row, options).map(order => {
+    const checked = Date.parse(order.checkedAt || snapshot.checkedAt);
+    const when = Number.isFinite(checked) ? new Date(checked).toLocaleString('en-US', {timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}) : 'time unknown';
+    return `${order.account}: ${order.action}\n${amount(order.remaining)} remaining · ${order.price} · ${order.duration} · ${order.status}\nChecked ${when}`;
+  }).join('\n\n');
+}
+
+export function pendingOrdersSource(snapshot) {
+  if (!Array.isArray(snapshot?.orders)) return 'Pending orders unavailable — sync saved broker evidence.';
+  const at = Date.parse(snapshot.checkedAt);
+  const checked = Number.isFinite(at) ? new Date(at).toLocaleString('en-US',{timeZone:'America/New_York',timeZoneName:'short'}) : 'time unknown';
+  return `Pending orders: ${snapshot.orders.length} saved · checked ${checked}. See each holding; a dash does not verify the absence of orders.`;
+}

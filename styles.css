@@ -42,3 +42,6 @@ body.reading-report .reports-panel{position:sticky;top:0;z-index:3;box-shadow:0 
 
 .report-content table, body.extended-columns .report-content table { min-width: 0; width: 100%; table-layout: fixed; }
 .report-content th, .report-content td { white-space: normal; overflow-wrap: anywhere; word-break: normal; }
+
+.pending-orders-source { margin: 8px 2px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+th[data-column="pendingOrder"], td[data-column="pendingOrder"] { width: 230px; min-width: 180px; max-width: 260px; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; vertical-align: top; }
