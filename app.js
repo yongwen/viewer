@@ -1,7 +1,7 @@
 import { loadGithubPortfolio, loadGithubReport, REPORT_TYPES, parsePortfolioExport, githubContentsUrl, githubReportLinks, DEFAULT_REPORT_SOURCE, markedAllocation, scopeTotals, displayUnrealizedPnl, needsValuation, markEvidence, valuationPresentation, createRefreshScheduler, MAX_EXPORT_BYTES } from "./loader.js";
 import { COLUMNS, OPTION_SORT_KEYS, positionDisplay, groupedHoldings, shortPutNotional, cashSectorValue, newYorkDate } from "./view-model.js";
 import { renderReportMarkdown } from "./report-markdown.js";
-import { pendingOrderText, pendingOrdersSource } from './open-orders.js';
+import { pendingOrderText, pendingOrderDetails, pendingOrdersSource } from './open-orders.js';
 
 const el = (id) => document.getElementById(id);
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -456,6 +456,7 @@ function renderHoldings() {
       else {
         for(const column of COLUMNS.slice(1)) {
           const cell=node('td',column.key==='pendingOrder' ? pendingOrderText(portfolio.openOrders,{symbol:group.symbol}, {group:true,accounts:group.options.map(p=>p.account)}) || '—' : '—',column.extra?'option-col':'muted');
+          if(column.key==='pendingOrder') cell.title=pendingOrderDetails(portfolio.openOrders,{symbol:group.symbol},{group:true,accounts:group.options.map(p=>p.account)});
           cell.dataset.column=column.key;tr.append(cell);
         }
       }
@@ -479,7 +480,7 @@ function appendHoldingCells(tr,row) {
     const td=node('td',null,column.extra?'option-col':'');td.dataset.column=key;
     if(key==='pendingOrder') {
       td.textContent=pendingOrderText(portfolio.openOrders,row)||'—';
-      td.title='Saved broker orders matched to this holding and account. Pending trades have not changed the recorded position.';
+      td.title=pendingOrderDetails(portfolio.openOrders,row)||'Saved broker orders matched to this holding and account. Pending trades have not changed the recorded position.';
     } else if(key==='price') {
       const evidence=markEvidence(row),details=node('details',null,'quote-details');
       details.append(node('summary',price(row.price)));

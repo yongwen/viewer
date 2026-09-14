@@ -82,7 +82,64 @@ export function ordersForHolding(snapshot, row, {group = false, accounts} = {}) 
   });
 }
 
+const compactAccount = account => String(account || '')
+  .replace(/^schwab\s+(\d+)$/i, 'S-$1')
+  .replace(/^(?:hood|robinhood)\s+(br|ira)$/i, (_, suffix) => `H-${suffix.toUpperCase()}`);
+
+function optionLeg(line) {
+  const match = /^(BUY|SELL) TO (OPEN|CLOSE) (ratio )?(\d+(?:\.\d+)?|Unknown) ([A-Za-z0-9.^/-]+) (\d{4}-\d{2}-\d{2}) \$(\d+(?:\.\d+)?) (put|call)$/i.exec(line.trim());
+  if (!match) return null;
+  return {code:`${match[1][0]}T${match[2][0]}`.toUpperCase(), ratio:Boolean(match[3]), quantity:number(match[4]),
+    symbol:match[5].toUpperCase(), contract:`${match[6]} $${amount(match[7])}${match[8][0].toUpperCase()}`, kind:match[8].toLowerCase()};
+}
+
+function remainingLegQuantity(order, leg) {
+  const remaining = number(order.remaining);
+  if (remaining === null || leg.quantity === null) return null;
+  const total = leg.ratio ? 1 : number(order.quantity);
+  return total > 0 ? Number((remaining * leg.quantity / total).toPrecision(12)) : null;
+}
+
+function compactPrice(order, {option = false, net = false} = {}) {
+  const price = String(order.price || 'Price unavailable');
+  const limit = /\bLimit \$(-?\d+(?:\.\d+)?)/i.exec(price);
+  const stop = /\bStop \$(-?\d+(?:\.\d+)?)/i.exec(price);
+  if (!limit && !stop) return price;
+  // Single-option signs follow the quoted-price shorthand. A roll's sign is
+  // its broker-reported net credit/debit, never inferred from one leg.
+  const sign = !option ? '' : !net ? '+' : /\bcredit\b/i.test(price) ? '+' : /\bdebit\b/i.test(price) ? '-' : '';
+  const quoted = limit ? `${sign}$${amount(option ? Math.abs(Number(limit[1])) : limit[1])}` : '';
+  const trigger = stop ? `stop $${amount(stop[1])}` : '';
+  return [quoted, trigger].filter(Boolean).join(' / ');
+}
+
+function compactOrder(order) {
+  const lines = String(order.action || '').split('\n').filter(Boolean);
+  const legs = lines.map(optionLeg);
+  const account = compactAccount(order.account);
+  if (legs.length && legs.every(Boolean)) {
+    const opening = legs.find(leg => leg.code.endsWith('O'));
+    const closing = legs.find(leg => leg.code.endsWith('C'));
+    const quantity = opening && remainingLegQuantity(order, opening);
+    const roll = legs.length === 2 && opening && closing
+      && opening.code[0] !== closing.code[0] && opening.symbol === closing.symbol && opening.kind === closing.kind
+      && opening.contract !== closing.contract && quantity > 0 && quantity === remainingLegQuantity(order, closing);
+    const action = roll ? `roll${quantity === 1 ? '' : ` ${amount(quantity)}`} to ${opening.contract}`
+      : legs.map(leg => `${leg.code} ${amount(remainingLegQuantity(order, leg))} ${leg.contract}`).join(' / ');
+    return `${account}: ${action} at ${compactPrice(order, {option:true, net:legs.length > 1})}`;
+  }
+  const stock = lines.length === 1 && /^(BUY|SELL)(?:\s+(?:\d+(?:\.\d+)?|Unknown))?\s+([A-Za-z0-9.^/-]+)$/i.exec(lines[0]);
+  if (stock && stock[2].toUpperCase() === String(order.symbol).toUpperCase()) {
+    return `${account}: ${stock[1][0].toUpperCase()}${stock[1].slice(1).toLowerCase()} ${amount(order.remaining)} at ${compactPrice(order)}`;
+  }
+  return `${account}: ${lines.join(' / ')} · ${amount(order.remaining)} remaining · ${order.price}`;
+}
+
 export function pendingOrderText(snapshot, row, options = {}) {
+  return ordersForHolding(snapshot, row, options).map(compactOrder).join('\n');
+}
+
+export function pendingOrderDetails(snapshot, row, options = {}) {
   return ordersForHolding(snapshot, row, options).map(order => {
     const checked = Date.parse(order.checkedAt || snapshot.checkedAt);
     const when = Number.isFinite(checked) ? new Date(checked).toLocaleString('en-US', {timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}) : 'time unknown';
