@@ -1,5 +1,5 @@
 import { loadGithubPortfolio, loadGithubReport, REPORT_TYPES, parsePortfolioExport, githubContentsUrl, githubReportLinks, DEFAULT_REPORT_SOURCE, markedAllocation, scopeTotals, displayUnrealizedPnl, needsValuation, markEvidence, valuationPresentation, createRefreshScheduler, MAX_EXPORT_BYTES } from "./loader.js";
-import { COLUMNS, OPTION_SORT_KEYS, positionDisplay, groupedHoldings, shortPutNotional, cashSectorValue, newYorkDate } from "./view-model.js";
+import { COLUMNS, OPTION_SORT_KEYS, positionDisplay, groupedHoldings, shortPutNotional, cashSectorValue, newYorkDate, marketRefreshMessage } from "./view-model.js";
 import { renderReportMarkdown } from "./report-markdown.js";
 import { pendingOrderText, pendingOrderDetails, pendingOrdersSource } from './open-orders.js';
 
@@ -314,6 +314,11 @@ function marketMetric(label, record, fear=false) {
     const link=node('a',String(record.source||'').toLowerCase()==='cnn'?'CNN':record.source||'Source');link.href=record.sourceUrl;link.target='_blank';link.rel='noopener noreferrer';
     item.querySelector('.detail').append(document.createTextNode(' · '),link);
   }
+  const refreshMessage = marketRefreshMessage(record, fear ? 'CNN' : 'Quote');
+  if (available && refreshMessage) {
+    const checkedAt = record.refresh?.retrievedAt;
+    item.append(node('p', `${refreshMessage}${checkedAt ? ` · Checked ${time(checkedAt)}` : ''}`, 'detail unavailable'));
+  }
   return item;
 }
 function renderMarkets(positions) {
@@ -390,8 +395,8 @@ function hideAllocation() {
   allocationAnchor?.querySelector('.allocation-trigger')?.setAttribute('aria-expanded','false');
   allocationAnchor=null;
 }
-function showAllocation(tr,row) {
-  hideAllocation();allocationAnchor=tr;
+function showAllocation(anchor,row) {
+  hideAllocation();allocationAnchor=anchor;
   const popup=node('div',null,'allocation-popup');popup.id='allocation-popup';popup.setAttribute('role','tooltip');
   popup.append(node('strong',`${row.symbol} · Account allocation`));
   const table=node('table'),head=node('thead'),header=node('tr');
@@ -404,8 +409,8 @@ function showAllocation(tr,row) {
     body.append(line);
   }
   table.append(body);popup.append(table);document.body.append(popup);allocationPopup=popup;
-  tr.querySelector('.allocation-trigger')?.setAttribute('aria-expanded','true');
-  const anchor=tr.querySelector('[data-column="quantity"]')||tr,box=anchor.getBoundingClientRect(),bounds=popup.getBoundingClientRect();
+  anchor.querySelector('.allocation-trigger')?.setAttribute('aria-expanded','true');
+  const box=anchor.getBoundingClientRect(),bounds=popup.getBoundingClientRect();
   popup.style.left=`${Math.max(8,Math.min(box.left,window.innerWidth-bounds.width-8))}px`;
   popup.style.top=`${Math.max(8,box.bottom+bounds.height+8>window.innerHeight?box.top-bounds.height-8:box.bottom+8)}px`;
 }
@@ -442,16 +447,20 @@ function renderHoldings() {
         const toggle=node('button',open?'▾':'▸','group-toggle');toggle.type='button';toggle.dataset.toggle=group.symbol;
         toggle.setAttribute('aria-label',`${open?'Collapse':'Expand'} ${group.symbol} options`);toggle.setAttribute('aria-expanded',String(open));ticker.append(toggle);
       } else ticker.append(node('span',null,'toggle-space'));
-      ticker.append(node('span',group.symbol,'holding-symbol'));
+      holding.dataset.column='symbol';
+      if(row?.assetClass==='stock') {
+        const button=node('button',group.symbol,'holding-symbol allocation-trigger');button.type='button';
+        button.setAttribute('aria-label',`${row.symbol} account allocation`);button.setAttribute('aria-expanded','false');button.setAttribute('aria-describedby','allocation-popup');
+        button.addEventListener('focus',()=>showAllocation(holding,row));button.addEventListener('click',()=>showAllocation(holding,row));button.addEventListener('blur',hideAllocation);
+        ticker.append(button);
+        holding.addEventListener('mouseenter',()=>showAllocation(holding,row));
+        holding.addEventListener('mouseleave',hideAllocation);
+      } else ticker.append(node('span',group.symbol,'holding-symbol'));
       if(index===0&&group.options.length)ticker.append(node('span',`${group.options.length} opt`,'option-count'));
       holding.append(ticker,node('div',row?`${assetName(row.assetClass)}${row.includedInPortfolioValue===false?' · excluded futures notional '+money(row.notionalValue):''}`:'Options only','holding-detail'));
       tr.append(holding);
       if(row) {
         appendHoldingCells(tr,row);
-        if(row.assetClass==='stock') {
-          tr.addEventListener('mouseenter',()=>showAllocation(tr,row));
-          tr.addEventListener('mouseleave',()=>{if(!tr.contains(document.activeElement))hideAllocation();});
-        }
       }
       else {
         for(const column of COLUMNS.slice(1)) {
@@ -494,11 +503,7 @@ function appendHoldingCells(tr,row) {
     else if(key==='optionIv')td.textContent=Number.isFinite(val)?`${(val*100).toFixed(1)}%`:'—';
     else if(key==='optionDelta')td.textContent=Number.isFinite(val)?val.toFixed(2):'—';
     else if(key==='quantity') {
-      if(row.assetClass==='stock') {
-        const button=node('button',row.isCash?(Number.isFinite(row.marketValue)?currency.format(row.marketValue):'—'):number(val),'allocation-trigger');button.type='button';
-        button.setAttribute('aria-label',`${row.symbol} account allocation`);button.setAttribute('aria-expanded','false');button.setAttribute('aria-describedby','allocation-popup');
-        button.addEventListener('focus',()=>showAllocation(tr,row));button.addEventListener('click',()=>showAllocation(tr,row));button.addEventListener('blur',hideAllocation);td.append(button);
-      } else td.textContent=`${number(val)}${row.assetClass==='option'?' ct':''}`;
+      td.textContent=row.isCash?(Number.isFinite(row.marketValue)?currency.format(row.marketValue):'—'):`${number(val)}${row.assetClass==='option'?' ct':''}`;
     }
     else if(key==='dte') {td.textContent=number(val);td.title=`Calendar days to expiry as of ${newYorkDate()} New York${row.expiration&&row.expiration<newYorkDate()?' · expired':''}`;}
     else if(['avgCost','effectiveAvgCost','extrinsicValue'].includes(key))td.textContent=price(val);

@@ -7,6 +7,12 @@ export const COLUMNS = Object.freeze([
 ].map(([key,label,extra=false])=>Object.freeze({key,label,extra})));
 export const OPTION_SORT_KEYS = new Set(['strikeDeltaPercent','dte','optionIv','optionDelta','extrinsicValue','effectiveAvgCost']);
 const finite = value => Number.isFinite(value) ? value : null;
+export function marketRefreshMessage(record, provider = 'Quote') {
+  const failure = record?.refresh?.status === 'unavailable' ? record.refresh
+    : record?.status === 'unavailable' ? record : null;
+  if (failure) return `${provider} feed temporarily unavailable`;
+  return record?.status === 'last-known' ? 'Latest reading not available' : '';
+}
 function validDate(value) {
   return typeof value==='string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value))
     && new Date(value).toISOString().slice(0,10)===value;
