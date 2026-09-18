@@ -53,7 +53,7 @@ function renderReportLinks(config = DEFAULT_REPORT_SOURCE) {
     if (type === selectedReport) link.setAttribute("aria-current", "page");
     return link;
   });
-  el("report-links").replaceChildren(...links);
+  el("report-links").replaceChildren(...links.filter(link => link.dataset.reportType !== "daily-market-portfolio-action-plan"));
   el("report-source").textContent = `${config.repository} · ${config.ref}`;
 }
 
