@@ -4,24 +4,60 @@ const text = value => typeof value === 'string' ? value.slice(0, 2000) : '';
 const number = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
 const amount = value => number(value) === null ? 'Unknown' : String(number(value));
 const terminal = new Set(['FILLED','CANCELED','CANCELLED','REPLACED','REJECTED','EXPIRED','FAILED']);
+const validTime = value => Number.isFinite(Date.parse(value));
+const evidenceTime = report => text(report?.brokerEvidence?.collectionWindow?.end || report?.brokerEvidence?.checkedAt
+  || report?.brokerEvidence?.generatedAt || report?.generatedAt);
 
-export function openOrdersFromReports(reports) {
+function savedOrder(order) {
+  // Retain only display fields, even if an older export contains private IDs.
+  return Object.fromEntries([
+    ...['broker','account','symbol','action','price','duration','status','checkedAt'].map(key => [key,text(order[key])]),
+    ...['quantity','filled','remaining'].map(key => [key,number(order[key])])
+  ]);
+}
+
+export function openOrdersFromReports(reports, {previousSnapshot = null, retainedSnapshot = null, gtcState = null} = {}) {
   const orderedReports = reports.filter(r => r && r.brokerEvidence && Number.isFinite(Date.parse(r.generatedAt)))
     .sort((a,b) => Date.parse(b.generatedAt)-Date.parse(a.generatedAt));
   const report = orderedReports[0];
-  if (!report) return null;
-  const orders = [], coverage = [], checkedTimes = [];
+  let orders = [];
+  const coverage = [], checkedTimes = [], sources = {};
   for (const [key, broker] of [['schwab','Schwab'],['robinhood','Robinhood']]) {
-    const sourceReport = orderedReports.find(r => Array.isArray(r.brokerEvidence[key]?.orders));
-    const evidence = sourceReport?.brokerEvidence || report.brokerEvidence;
+    let sourceReport = orderedReports.find(r => Array.isArray(r.brokerEvidence[key]?.orders));
+    const savedSource = snapshot => snapshot?.sources?.[key] || (snapshot?.orders?.some(order => order?.broker === broker)
+      ? {checkedAt:snapshot.checkedAt,reportGeneratedAt:snapshot.reportGeneratedAt} : null);
+    const savedSnapshot = [retainedSnapshot,previousSnapshot].filter(snapshot => Array.isArray(snapshot?.orders) && savedSource(snapshot))
+      .sort((a,b)=>(Date.parse(savedSource(b).checkedAt) || 0)-(Date.parse(savedSource(a).checkedAt) || 0))[0];
+    const savedRows = (savedSnapshot?.orders || []).filter(order => order?.broker === broker);
+    const previousSource = savedSource(savedSnapshot);
+    if (previousSource && (!sourceReport || Date.parse(previousSource.checkedAt) > Date.parse(evidenceTime(sourceReport)))) {
+      sources[key] = {checkedAt:text(previousSource.checkedAt), reportGeneratedAt:text(previousSource.reportGeneratedAt)};
+      const retained = savedRows.filter(order => !terminal.has(String(order.status).toUpperCase())).map(savedOrder);
+      orders.push(...retained);
+      checkedTimes.push(previousSource.checkedAt, ...retained.map(order => order.checkedAt));
+      coverage.push(`${broker}: retained ${retained.length} saved orders from ${text(previousSource.checkedAt) || 'an unknown check time'}; current order status and complete coverage are unverified.`);
+      continue;
+    }
+    // This snapshot covers only Robinhood GTC orders. It cannot clear Schwab
+    // evidence or establish that Day orders are absent.
+    let gtcOnly = false;
+    if (!sourceReport && key === 'robinhood' && Array.isArray(gtcState?.gtcOpenOrders) && validTime(gtcState.gtcOpenOrdersCheckedAt)) {
+      gtcOnly = true;
+      sourceReport = {generatedAt:gtcState.gtcOpenOrdersCheckedAt, brokerEvidence:{robinhood:{orders:gtcState.gtcOpenOrders
+        .filter(order => String(order.broker).toLowerCase() === 'robinhood')
+        .map(order => ({...order,status:order.status || order.state}))}}};
+    }
+    const evidence = sourceReport?.brokerEvidence || report?.brokerEvidence || {};
     const source = evidence[key];
     if (!source || !Array.isArray(source.orders)) {
       coverage.push(`${broker}: order evidence unavailable in this report.`);
       continue;
     }
-    const checked = text(evidence.collectionWindow?.end || evidence.generatedAt || sourceReport.generatedAt);
+    const checked = evidenceTime(sourceReport);
+    sources[key] = {checkedAt:checked,reportGeneratedAt:sourceReport.generatedAt};
     if (Number.isFinite(Date.parse(checked))) checkedTimes.push(checked);
-    if (sourceReport !== report) coverage.push(`${broker}: retained evidence from ${sourceReport.generatedAt}; the latest report did not refresh this broker.`);
+    if (gtcOnly) coverage.push('Robinhood: GTC-only saved state; Day orders and complete working-order coverage are unverified.');
+    else if (sourceReport !== report) coverage.push(`${broker}: retained evidence from ${sourceReport.generatedAt}; the latest report did not refresh this broker.`);
     coverage.push(`${broker}: ${source.orders.length} saved orders. ${key === 'schwab'
       ? text(source.olderGtcCoverage) || 'Older GTC coverage is unverified.'
       : source.workingPaginationComplete === true || source.paginationComplete === true ? 'Working-order pagination completed.' : 'Complete working-order coverage is unverified.'}`);
@@ -66,10 +102,41 @@ export function openOrdersFromReports(reports) {
         quantity, filled, remaining,
         price:[order.limitPrice != null ? `Limit $${amount(order.limitPrice)}` : '', order.stopPrice != null ? `Stop $${amount(order.stopPrice)}` : '', text(order.direction)].filter(Boolean).join(' · ') || 'Market / price unavailable',
         duration:['gtc','good_till_cancel'].includes(String(order.timeInForce).toLowerCase()) ? 'GTC' : ['gfd','day'].includes(String(order.timeInForce).toLowerCase()) ? 'Day' : text(order.timeInForce) || 'Unknown',
-        status:text(order.status) || 'Unknown', checkedAt:text(order.checkedAt || evidence.collectionWindow?.end || evidence.generatedAt)});
+        status:text(order.status) || 'Unknown', checkedAt:text(order.checkedAt || checked)});
     }
   }
-  return {version:1,reportGeneratedAt:report.generatedAt,checkedAt:checkedTimes.sort((a,b)=>Date.parse(a)-Date.parse(b))[0] || '',orders,coverage};
+  if (!Object.keys(sources).length) return null;
+  // A newer GTC-only refresh replaces that reservation list without discarding
+  // retained Day orders or another broker's evidence.
+  if (Array.isArray(gtcState?.gtcOpenOrders) && validTime(gtcState.gtcOpenOrdersCheckedAt)
+    && Date.parse(gtcState.gtcOpenOrdersCheckedAt) > Date.parse(sources.robinhood?.checkedAt)) {
+    const gtcSnapshot = openOrdersFromReports([], {gtcState});
+    orders = orders.filter(order => order.broker !== 'Robinhood' || order.duration !== 'GTC');
+    orders.push(...gtcSnapshot.orders);
+    coverage.push(`Robinhood: GTC-only snapshot updated at ${gtcState.gtcOpenOrdersCheckedAt}; ${gtcSnapshot.orders.length} saved GTC orders.`);
+  }
+  // A complete, newer broker-specific zero is evidence of absence for that
+  // instrument class. Positive counts cannot replace itemized order details.
+  const cleared = {};
+  for (const [field, kind, matches] of [
+    ['openRobinhoodOptionOrders','option',order => /(?:^|\n)(?:BUY|SELL) TO (?:OPEN|CLOSE) /.test(order.action)],
+    ['openRobinhoodEquityOrders','equity',order => /^(?:BUY|SELL)(?: [\d.]+)? [A-Za-z0-9.^/-]+$/.test(order.action)]
+  ]) {
+    const summary = orderedReports.find(r => r.brokerEvidence.fullSupportedPaginationChecked === true
+      && Number.isInteger(r.brokerEvidence[field]) && r.brokerEvidence[field] >= 0);
+    const checked = [summary?.brokerEvidence[field] === 0 ? evidenceTime(summary) : '',
+      previousSnapshot?.cleared?.[kind],retainedSnapshot?.cleared?.[kind]]
+      .filter(validTime).sort((a,b)=>Date.parse(b)-Date.parse(a))[0];
+    if (!checked) continue;
+    cleared[kind] = checked;
+    const before = orders.length;
+    orders = orders.filter(order => order.broker !== 'Robinhood' || !matches(order)
+      || !(Date.parse(checked) >= Date.parse(order.checkedAt || sources.robinhood?.checkedAt)));
+    if (orders.length !== before) coverage.push(`Robinhood: newer complete check at ${checked} reported 0 open ${kind} orders; older ${kind} rows were removed.`);
+  }
+  checkedTimes.push(...orders.map(order => order.checkedAt));
+  return {version:1,reportGeneratedAt:report?.generatedAt || previousSnapshot?.reportGeneratedAt || retainedSnapshot?.reportGeneratedAt || gtcState?.gtcOpenOrdersCheckedAt || '',
+    checkedAt:checkedTimes.filter(validTime).sort((a,b)=>Date.parse(a)-Date.parse(b))[0] || '',orders,coverage,sources,cleared};
 }
 
 export function renderOpenOrders(snapshot, {account = '', now = Date.now()} = {}) {
@@ -169,9 +236,10 @@ export function pendingOrderDetails(snapshot, row, options = {}) {
   }).join('\n\n');
 }
 
-export function pendingOrdersSource(snapshot) {
+export function pendingOrdersSource(snapshot, {now = Date.now()} = {}) {
   if (!Array.isArray(snapshot?.orders)) return 'Pending orders unavailable — sync saved broker evidence.';
   const at = Date.parse(snapshot.checkedAt);
   const checked = Number.isFinite(at) ? new Date(at).toLocaleString('en-US',{timeZone:'America/New_York',timeZoneName:'short'}) : 'time unknown';
-  return `Pending orders: ${snapshot.orders.length} saved · checked ${checked}. See each holding; a dash does not verify the absence of orders.`;
+  const stale = !Number.isFinite(at) || now - at > 15*60*1000;
+  return `Pending orders: ${snapshot.orders.length} saved · checked ${checked}.${stale ? ' Older snapshot; current order status is unverified.' : ''} See each holding; a dash does not verify the absence of orders.`;
 }
