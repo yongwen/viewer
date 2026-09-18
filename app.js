@@ -6,6 +6,7 @@ import { pendingOrderText, pendingOrderDetails, pendingOrdersSource } from './op
 const el = (id) => document.getElementById(id);
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
+const wholeQuantity = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const compact = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
 const dateFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" });
 const assetNames = { stock: "Stocks", etf: "ETFs", mutual_fund: "Mutual funds", mutualFund: "Mutual funds", option: "Options", cash: "Cash", cash_equivalent: "Cash equivalents", bond: "Bonds", index_future: "Futures", other: "Other" };
@@ -503,7 +504,9 @@ function appendHoldingCells(tr,row) {
     else if(key==='optionIv')td.textContent=Number.isFinite(val)?`${(val*100).toFixed(1)}%`:'—';
     else if(key==='optionDelta')td.textContent=Number.isFinite(val)?val.toFixed(2):'—';
     else if(key==='quantity') {
-      td.textContent=row.isCash?(Number.isFinite(row.marketValue)?currency.format(row.marketValue):'—'):`${number(val)}${row.assetClass==='option'?' ct':''}`;
+      const value=row.isCash?row.marketValue:val, suffix=row.assetClass==='option'?' ct':'';
+      td.textContent=Number.isFinite(value)?`${(row.isCash?wholeCurrency:wholeQuantity).format(Math.abs(value)<0.5?0:value)}${suffix}`:'—';
+      if(Number.isFinite(value))td.title=`Full position: ${row.isCash?currency.format(value):String(value)}${suffix}`;
     }
     else if(key==='dte') {td.textContent=number(val);td.title=`Calendar days to expiry as of ${newYorkDate()} New York${row.expiration&&row.expiration<newYorkDate()?' · expired':''}`;}
     else if(['avgCost','effectiveAvgCost','extrinsicValue'].includes(key))td.textContent=price(val);
